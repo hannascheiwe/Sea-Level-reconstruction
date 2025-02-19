@@ -1,0 +1,891 @@
+---
+title: "Sea Level Trends for Different Locations"
+subtitle: "R Script for Reproduction"
+author: "Hanna Scheiwe"
+date: "14.02.2025"
+output:
+  html_document:
+    code_folding: hide
+    theme: cosmo
+    highlight: tango
+    toc: true
+    toc_depth: 2
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+## Prepare Environment and load the Data
+graphics.off()
+rm(list = ls(all = TRUE))
+
+
+
+#install.packages(c("maps", "rnaturalearth", "sf"))
+#install.packages("ggplot2")
+#install.packages("rnaturalearthdata")
+library(ncdf4)
+library(CFtime)
+library(lattice)
+library(RColorBrewer)
+library(ggplot2)
+library(maps)
+library(rnaturalearthdata)
+library(rnaturalearth)
+library(sf)
+library(ggplot2)
+```
+
+
+For this analysis I use the HCC data set with the relative water levels (counterclimatic and observed).
+[Data can be accessed here](https://data.isimip.org/10.48364/ISIMIP.749905)
+
+# **Global and Regional Water level changes (fig.13)**
+
+In this part we will make a plot of the regional observed water level changes and compare it to the global average. 
+What we use for this is the hourly hcc waterlevel data that can be downloaded for every year seperately.
+In order to get a first idea of this data, we can take one example year:
+For this we extract the relevant variables and then take Stockholm as location.
+
+```{r}
+setwd("/Users/hannascheiwe/Desktop/CLEWS2.0/uni_kram/CC_Adaptation/data/hourly_data_relative_waterlevels_observed")
+
+wl1997 <- nc_open("hcc_obsclim_waterlevel_global_hourly_1997.nc")
+print(wl1997)
+water_level_1997 <- ncvar_get(wl1997, "waterlevel")
+lat <- ncvar_get(wl1997, "lat")
+lon <- ncvar_get(wl1997, "lon")
+time_values_1997 <- ncvar_get(wl1997, "time")
+
+
+stockholm_lat <- 59.3293
+stockholm_lon <- 18.0686
+
+distances_1997 <- sqrt((lat - stockholm_lat)^2 + (lon - stockholm_lon)^2)
+closest_station_idx_1997 <- which.min(distances_1997)
+
+stockholm_water_level_1997 <- water_level_1997[closest_station_idx_1997 , ]  
+
+
+# Calculate global average water level for each time step (average across all stations)
+global_average_water_level_1997 <- rowMeans(water_level_1997, na.rm = TRUE)
+
+mean_water_level_all_stations_1997 <- apply(water_level_1997, 2, mean, na.rm = TRUE) 
+#--> calculates the average water level across all stations for each time step
+
+
+global_avg_sea_level_1997 <- mean(mean_water_level_all_stations_1997, na.rm = TRUE)
+```
+
+Okay now we do have the average values we were looking for, but the goal is to have a time series over the whole period. So the next step will be to get the mean value of all stations for the respective year in order to get the development of the global average sea level change. For this we can use a loop that applies all these steps for the different data. *Here it is important that all the files are stored in the same folder.*
+
+```{r}
+
+global_avg_sea_levels <- vector("numeric", length = 19) 
+
+stockholm_water_levels <- vector("list", length = 19)  
+
+for (year in 1997:2015) {
+  file_name <- paste0("hcc_obsclim_waterlevel_global_hourly_", year, ".nc")
+  if (file.exists(file_name)) {
+    dat <- nc_open(file_name)
+    water_level <- ncvar_get(dat, "waterlevel")
+    lat <- ncvar_get(dat, "lat")
+    lon <- ncvar_get(dat, "lon")
+    time_values <- ncvar_get(dat, "time")
+    distances <- sqrt((lat - stockholm_lat)^2 + (lon - stockholm_lon)^2)
+    closest_station_idx <- which.min(distances)
+    stockholm_water_level <- water_level[closest_station_idx , ]
+    stockholm_water_levels[[year - 1996]] <- stockholm_water_level
+    global_average_water_level <- rowMeans(water_level, na.rm = TRUE)
+    mean_water_level_all_stations <- apply(water_level, 2, mean, na.rm = TRUE)
+    global_avg_sea_level <- mean(mean_water_level_all_stations, na.rm = TRUE)
+    
+
+    global_avg_sea_levels[year - 1996] <- global_avg_sea_level 
+  } else {
+    
+    cat("File for year", year, "not found. Skipping...\n")
+  }
+}
+
+print(global_avg_sea_levels)
+```
+
+
+## **Stockholm**
+
+There might be some repetition in the code and we could probably make it way easier but this is how it worked out in the end, but feel free to play around with it.
+Also we will iteratively plot the time series of the region to the global average.
+
+```{r}
+years <- 1997:2015
+yearly_stockholm_water_levels <- vector("numeric", length = 19)
+
+for (year in 1997:2015) {
+  file_name <- paste0("hcc_obsclim_waterlevel_global_hourly_", year, ".nc")
+  if (file.exists(file_name)) {
+    dat <- nc_open(file_name)
+    water_level <- ncvar_get(dat, "waterlevel")
+    lat <- ncvar_get(dat, "lat")
+    lon <- ncvar_get(dat, "lon")
+
+    distances <- sqrt((lat - stockholm_lat)^2 + (lon - stockholm_lon)^2)
+    closest_station_idx <- which.min(distances)
+    
+    
+    stockholm_water_level <- water_level[closest_station_idx , ]
+    
+   
+    yearly_stockholm_water_levels[year - 1996] <- mean(stockholm_water_level, na.rm = TRUE)
+    
+    
+    global_average_water_level <- rowMeans(water_level, na.rm = TRUE)
+    
+    
+    mean_water_level_all_stations <- apply(water_level, 2, mean, na.rm = TRUE)
+    
+    
+    global_avg_sea_levels[year - 1996] <- mean(mean_water_level_all_stations, na.rm = TRUE)  
+  } else {
+    cat("File for year", year, "not found. Skipping...\n")
+  }
+}
+
+
+```
+
+```{r plot-water-levels, fig.width=8, fig.height=6, echo=FALSE}
+ylim_range <- c(min(yearly_stockholm_water_levels, na.rm = TRUE) - 4, 
+                max(yearly_stockholm_water_levels, na.rm = TRUE) + 4)
+
+data <- data.frame(
+  Year = rep(years, 2),
+  Water_Level = c(global_avg_sea_levels, yearly_stockholm_water_levels),
+  Series = rep(c("Global Average", "Stockholm"), each = length(years))
+)
+
+
+########plotting the average and stockholm sea level:
+
+ggplot(data, aes(x = Year, y = Water_Level, color = Series)) +
+  geom_line(size = 1.2) +
+  labs(
+    title = "Global and Stockholm Water Level Changes (1997-2015)",
+    x = "Year",
+    y = "Water Level (mm)"
+  ) +
+  scale_color_manual(values = c("blue", "red")) +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+
+```
+
+## **Manila**
+
+```{r}
+manila_lat <- 14.5995  
+manila_lon <- 120.9842 
+
+yearly_manila_water_levels <- vector("numeric", length = 19)
+
+
+for (year in 1997:2015) {
+  file_name <- paste0("hcc_obsclim_waterlevel_global_hourly_", year, ".nc")
+  if (file.exists(file_name)) {
+    dat <- nc_open(file_name)
+    water_level <- ncvar_get(dat, "waterlevel")
+    lat <- ncvar_get(dat, "lat")
+    lon <- ncvar_get(dat, "lon")
+    distances <- sqrt((lat - manila_lat)^2 + (lon - manila_lon)^2)
+    closest_station_idx <- which.min(distances)
+    manila_water_level <- water_level[closest_station_idx , ]
+    yearly_manila_water_levels[year - 1996] <- mean(manila_water_level, na.rm = TRUE)
+    global_average_water_level <- rowMeans(water_level, na.rm = TRUE)
+    
+    mean_water_level_all_stations <- apply(water_level, 2, mean, na.rm = TRUE)
+    
+
+    global_avg_sea_levels[year - 1996] <- mean(mean_water_level_all_stations, na.rm = TRUE) 
+  } else {
+
+    cat("File for year", year, "not found. Skipping...\n")
+  }
+}
+
+######add manila to the plot
+
+data <- data.frame(
+  Year = rep(years, 3),
+  Water_Level = c(global_avg_sea_levels, yearly_stockholm_water_levels, yearly_manila_water_levels),
+  Series = rep(c("Global Average", "Stockholm", "Manila"), each = length(years))
+)
+
+
+ggplot(data, aes(x = Year, y = Water_Level, color = Series)) +
+  geom_line(size = 1.2) +
+  labs(
+    title = "Global, Stockholm and Manila Water Level Changes (1997-2015)",
+    x = "Year",
+    y = "Water Level (mm)"
+  ) +
+  scale_color_manual(values = c("blue", "red", "orange")) +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+
+
+```
+
+## **Charlottetown**
+
+```{r}
+charlottetown_lat <- 46.2382
+charlottetown_lon <- -63.1311
+
+yearly_charlottetown_water_levels <- vector("numeric", length = 19)
+
+
+for (year in 1997:2015) {
+  file_name <- paste0("hcc_obsclim_waterlevel_global_hourly_", year, ".nc")
+  if (file.exists(file_name)) {
+    dat <- nc_open(file_name)
+    water_level <- ncvar_get(dat, "waterlevel")
+    lat <- ncvar_get(dat, "lat")
+    lon <- ncvar_get(dat, "lon")
+    distances <- sqrt((lat - charlottetown_lat)^2 + (lon - charlottetown_lon)^2)
+    closest_station_idx <- which.min(distances)
+    charlottetown_water_level <- water_level[closest_station_idx , ]
+    yearly_charlottetown_water_levels[year - 1996] <- mean(charlottetown_water_level, na.rm = TRUE)
+    global_average_water_level <- rowMeans(water_level, na.rm = TRUE)
+    mean_water_level_all_stations <- apply(water_level, 2, mean, na.rm = TRUE)
+    
+
+    global_avg_sea_levels[year - 1996] <- mean(mean_water_level_all_stations, na.rm = TRUE)  
+  } else {
+    cat("File for year", year, "not found. Skipping...\n")
+  }
+}
+
+# plot
+data <- data.frame(
+  Year = rep(years, 4),
+  Water_Level = c(global_avg_sea_levels, yearly_stockholm_water_levels, yearly_manila_water_levels, yearly_charlottetown_water_levels),
+  Series = rep(c("Global Average", "Stockholm", "Manila", "Charlottetown"), each = length(years))
+)
+
+
+ggplot(data, aes(x = Year, y = Water_Level, color = Series)) +
+  geom_line(size = 1.2) +
+  labs(
+    title = "Global, Stockholm, Manila, and Charlottetown Water Level Changes (1997-2015)",
+    x = "Year",
+    y = "Water Level (mm)"
+  ) +
+  scale_color_manual(values = c("blue", "red", "orange", "green")) +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+
+```
+
+## **final combination**
+
+```{r, fig.width=10, fig.height=8}
+data <- data.frame(
+  year = rep(years, 4),
+  water_level = c(global_avg_sea_levels, yearly_stockholm_water_levels, 
+                  yearly_manila_water_levels, yearly_charlottetown_water_levels),
+  region = rep(c("Global Average", "Stockholm", "Manila", "Charlottetown"), each = length(years))
+)
+
+
+data$region <- factor(data$region, levels = c("Global Average", "Stockholm", "Manila", "Charlottetown"))
+
+
+water_level_changes_plot.png <-ggplot(data, aes(x = year, y = water_level, color = region, linetype = region)) +
+  geom_line(size = 1.7) +  
+  scale_color_manual(values = c("blue", "red", "orange", "green")) +  
+  scale_linetype_manual(values = c("solid", "dashed", "dashed", "dashed")) +  
+  labs(title = "Global and Regional Water Level Changes (1997-2015)", 
+       subtitle = "Comparison of global average water level and regional locations",
+       x = "Year", 
+       y = "Water Level (mm)") +
+  theme_minimal() + 
+  theme(
+    legend.position = "top",  
+    legend.title = element_blank(),  
+    legend.text = element_text(size = 10),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12, face = "italic")
+  ) +
+  scale_x_continuous(breaks = seq(1997, 2015, by = 1)) +  
+  scale_y_continuous(expand = c(0, 0), limits = c(min(data$water_level, na.rm = TRUE) - 10, 
+                                                  max(data$water_level, na.rm = TRUE) + 10))  
+
+print(water_level_changes_plot.png)
+#ggsave("water_level_changes_plot.png", width = 10, height = 6, dpi = 300)
+
+```
+
+
+
+# **Observed and Counterclimatic Coastal Water Levels**
+
+Load the data and extract the water level information. Then calculate the mean of the waterlevels over time. This is done for the **counterclimatic** and **observed** values. By print() we can take a look at the data and gain some information on what is included, and most importantly we can see the names of the variables we would like to extract. 
+
+## **Load and Process Observed Water Levels (fig.14)**
+
+```{r}
+
+observed_hcc_relative <- nc_open("hcc_obsclim_waterlevel_global_monthly_1901_1978.nc")
+print(observed_hcc_relative)
+
+rel_waterlevel_observed <- ncvar_get(observed_hcc_relative, "waterlevel")
+
+mean_rel_obs <- rowMeans(rel_waterlevel_observed, na.rm = TRUE)
+```
+
+## **Load and Process Counterclimatic Water Levels**
+
+```{r}
+counterclim_hcc_rel <- nc_open("hcc_counterclim_waterlevel_global_monthly_1901_1978.nc")
+print(counterclim_hcc_rel)
+
+rel_waterlevel_counter <- ncvar_get(counterclim_hcc_rel, "waterlevel")
+
+mean_rel_counter <- rowMeans(rel_waterlevel_counter, na.rm = TRUE)
+```
+
+## **Visualizing Global Water Level Trends**
+
+Now we can take a first glimpse on the data we just extracted. 
+The mean values can now for example be plotted on a world map to get a first idea of what the coastal water levels look like.
+
+```{r}
+lat <- ncvar_get(counterclim_hcc_rel, "lat")
+lon <- ncvar_get(counterclim_hcc_rel, "lon")
+
+df <- data.frame(
+  lon = lon,
+  lat = lat,
+  mean_rel_obs = mean_rel_obs
+)
+
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+
+
+ggplot() +
+  geom_sf(data = world, fill = "gray90") +
+  geom_point(data = df, aes(x = lon, y = lat, color = mean_rel_obs), size = 1) +
+  scale_color_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, name = "Water Level (mm)") +
+  coord_sf(xlim = c(-180, 180), ylim = c(-90, 90), expand = FALSE) +
+  labs(title = "Observed Coastal Water Levels (1901-1978 Mean)",
+       x = "Longitude", y = "Latitude") +
+  theme_minimal() +
+  theme(legend.position = "right")
+```
+
+```{r}
+
+
+df2 <- data.frame(
+  lon = lon,
+  lat = lat,
+  mean_rel_counter = mean_rel_counter
+)
+
+ggplot() +
+  geom_sf(data = world, fill = "gray90") +
+  geom_point(data = df2, aes(x = lon, y = lat, color = mean_rel_counter), size = 1) +
+  scale_color_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, name = "Water Level (mm)") +
+  coord_sf(xlim = c(-180, 180), ylim = c(-90, 90), expand = FALSE) +
+  labs(title = "Counterclimatic Coastal Water Levels (1901-1978 Mean)",
+       x = "Longitude", y = "Latitude") +
+  theme_minimal() +
+  theme(legend.position = "right")
+```
+
+# **Focus on Specific Locations**
+
+In the next steps, we look at three different locations (Stockholm, Charlottetown & Manila) and plot the different sea level trends that can be seen in these regions. 
+
+## **Map of Selected Locations**
+
+First, let´s create a map with the locations highlighted:
+
+```{r}
+stockholm_lat <- 59.3293 
+stockholm_lon <- 18.0686 
+
+stockholm_location <- data.frame(
+  lon = stockholm_lon,
+  lat = stockholm_lat,
+  name = "Stockholm"
+)
+
+charlottetown_lat <- 46.2382
+charlottetown_lon <- -63.1311
+
+charlottetown_location <- data.frame(
+  lon = charlottetown_lon,
+  lat = charlottetown_lat,
+  name = "Charlottetown"
+)
+
+manila_lat <- 14.5995  
+manila_lon <- 120.9842 
+
+manila_location <- data.frame(
+  lon = manila_lon,
+  lat = manila_lat,
+  name = "Manila"
+)
+
+
+
+world_plot <- ggplot() +
+  geom_sf(data = world, fill = "gray90", color = "white") +
+  geom_point(
+    data = charlottetown_location, 
+    aes(x = lon, y = lat), 
+    color = "red", 
+    size = 2
+  ) +   
+  geom_text(
+    data = charlottetown_location, 
+    aes(x = lon, y = lat, label = name), 
+    hjust = -0.2, vjust = 0, size = 4, color = "red"
+  ) +
+  geom_point(
+    data = stockholm_location, 
+    aes(x = lon, y = lat), 
+    color = "blue", 
+    size = 2
+  ) +
+  geom_text(
+    data = stockholm_location, 
+    aes(x = lon, y = lat, label = name), 
+    hjust = -0.2, vjust = 0, size = 4, color = "blue"
+  ) + 
+  geom_point(
+    data = manila_location, 
+    aes(x = lon, y = lat), 
+    color = "purple", 
+    size = 2
+  ) +
+  geom_text(
+    data = manila_location, 
+    aes(x = lon, y = lat, label = name), 
+    hjust = -0.2, vjust = 0, size = 4, color = "purple"
+  ) +
+  labs(
+    title = "Locations on the World Map",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  coord_sf(xlim = c(-180, 180), ylim = c(-90, 90), expand = FALSE) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10)
+  )
+
+print(world_plot)
+
+```
+
+Next, we can plot time series for the single locations. This is done for the counterclimatic and observed data. On top of that we can calculate sea level trends for each data set and visualize this.
+
+# **Sea Level Trends for Each Location**
+
+## **Stockholm**
+
+```{r}
+lat_diff <- abs(lat - stockholm_lat) 
+lon_diff <- abs(lon - stockholm_lon) 
+
+
+closest_station_index <- which.min(lat_diff + lon_diff) 
+
+#counterclimatic
+
+stockholm_waterlevel_counter <- rel_waterlevel_counter[closest_station_index, ] 
+station_water_levels <- rel_waterlevel_counter[1, ]  
+time_period <- 1:length(station_water_levels) 
+
+#calculate the trend model
+trend_model_counter_st <- lm(stockholm_waterlevel_counter ~ time_period)
+
+slope_counter_st <- coef(trend_model_counter_st)[2]
+intercept_counter_st <- coef(trend_model_counter_st)[1]
+
+
+
+stockholm_data_counter <- data.frame(
+   Time = time_period,  
+  WaterLevel = stockholm_waterlevel_counter
+)
+
+ggplot(stockholm_data_counter, aes(x = Time, y = WaterLevel)) +  
+  geom_line(color = "lightgrey", size = 0.5) + 
+  geom_abline(slope = coef(trend_model_counter_st)[2], intercept = coef(trend_model_counter_st)[1], color = "red", size = 0.5) +  
+  labs(title = "Sea Level Trend for Stockholm (counterfactual data)",
+       x = "Time",
+       y = "Relative Sea Level (mm)") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10)
+  )
+
+```
+
+```{r}
+
+stockholm_waterlevel_observed <- rel_waterlevel_observed[closest_station_index, ]
+
+trend_model_observ_st <- lm(stockholm_waterlevel_observed ~ time_period)
+
+slope_observ_st <- coef(trend_model_observ_st)[2]
+intercept_observe_st <- coef(trend_model_observ_st)[1]
+
+stockholm_data_observed <- data.frame(
+   Time = time_period,  
+  WaterLevel = stockholm_waterlevel_observed
+)
+
+
+stockholm_data_observed <- data.frame(
+  Time = time_period,  
+  WaterLevel = stockholm_waterlevel_observed
+)
+
+ggplot(stockholm_data_observed, aes(x = Time, y = WaterLevel)) +  
+  geom_line(color = "lightgrey", size = 0.5) + 
+  geom_abline(slope = coef(trend_model_observ_st)[2], intercept = coef(trend_model_observ_st)[1], color = "red", size = 0.5) +  
+  labs(title = "Sea Level Trend for Stockholm (observed data)",
+       x = "Time",
+       y = "Relative Sea Level (mm)") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10)
+  )
+```
+
+Now we can combine these two plots:
+
+```{r}
+stockholm_combined_data <- data.frame(
+  Time = time_period,
+  WaterLevel = c(stockholm_waterlevel_observed, stockholm_waterlevel_counter),
+  Dataset = rep(c("Observed", "Counterfactual"), each = length(time_period))
+)
+
+
+plot_st <- ggplot(stockholm_combined_data, aes(x = Time, y = WaterLevel, color = Dataset, linetype = Dataset)) +
+  geom_line(size = 0.5) +
+  scale_color_manual(values = c("Observed" = "blue", "Counterfactual" = "orange")) +
+  scale_linetype_manual(values = c("Observed" = "dashed", "Counterfactual" = "solid")) +
+  geom_abline(slope = coef(trend_model_counter_st)[2], intercept = coef(trend_model_counter_st)[1], color = "orange", size = 0.9) + 
+  geom_abline(slope = coef(trend_model_observ_st)[2], intercept = coef(trend_model_observ_st)[1], color = "blue", size = 0.9) +  
+  labs(
+    title = "Observed vs Counterfactual Sea Levels in Stockholm",
+    x = "Time",
+    y = "Relative Sea Level (mm)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10)
+  )
+
+plot(plot_st)
+
+```
+
+## **Charlottetown**
+
+```{r}
+lat_diff_charlottetown <- abs(lat - charlottetown_lat)
+lon_diff_charlottetown <- abs(lon - charlottetown_lon)
+
+closest_station_index_charlottetown <- which.min(lat_diff_charlottetown + lon_diff_charlottetown)
+
+charlottetown_waterlevel_observed <- rel_waterlevel_observed[closest_station_index_charlottetown, ]
+charlottetown_waterlevel_counter <- rel_waterlevel_counter[closest_station_index_charlottetown, ]
+
+charlottetown_combined_data <- data.frame(
+  Time = time_period,
+  WaterLevel = c(charlottetown_waterlevel_observed, charlottetown_waterlevel_counter),
+  Dataset = rep(c("Observed", "Counterfactual"), each = length(time_period))
+)
+
+#observed
+
+trend_model_observ_ch <- lm(charlottetown_waterlevel_observed ~ time_period)
+
+slope_observ_ch <- coef(trend_model_observ_ch)[2]
+intercept_observe_ch <- coef(trend_model_observ_ch)[1]
+
+#counterfactuals
+trend_model_count_ch <- lm(charlottetown_waterlevel_counter ~ time_period)
+
+slope_count_ch <- coef(trend_model_count_ch)[2]
+intercept_count_ch <- coef(trend_model_count_ch)[1]
+
+#plot
+
+plot_ch <- ggplot(charlottetown_combined_data, aes(x = Time, y = WaterLevel, color = Dataset, linetype = Dataset)) +
+  geom_line(size = 0.5) +
+  scale_color_manual(values = c("Observed" = "blue", "Counterfactual" = "orange")) +
+  scale_linetype_manual(values = c("Observed" = "dashed", "Counterfactual" = "solid")) +
+  geom_abline(slope = coef(trend_model_count_ch)[2], intercept = coef(trend_model_count_ch)[1], color = "orange", size = 0.9) + 
+  geom_abline(slope = coef(trend_model_observ_ch)[2], intercept = coef(trend_model_observ_ch)[1], color = "blue", size = 0.9) +  
+  labs(
+    title = "Observed vs Counterfactual Sea Levels in Stockholm",
+    x = "Time",
+    y = "Relative Sea Level (mm)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10)
+  )
+
+plot(plot_ch)
+
+```
+
+## **Manila**
+
+```{r}
+lat_diff_manila <- abs(lat - manila_lat)  
+lon_diff_manila <- abs(lon - manila_lon)  
+
+closest_station_index_manila <- which.min(lat_diff_manila + lon_diff_manila)
+
+manila_waterlevel_observed <- rel_waterlevel_observed[closest_station_index_manila, ]
+
+station_water_levels_manila <- rel_waterlevel_observed[1, ]  
+time_period <- 1:length(station_water_levels)  
+
+#observed
+
+trend_model_observ_manila <- lm(manila_waterlevel_observed ~ time_period)
+
+slope_observ_manila <- coef(trend_model_observ_manila)[2]
+intercept_observe_manila <- coef(trend_model_observ_manila)[1]
+
+manila_data_observed <- data.frame(
+  Time = time_period,  
+  WaterLevel = manila_waterlevel_observed
+)
+
+#counterclimatic
+manila_waterlevel_counter <- rel_waterlevel_counter[closest_station_index_manila, ]
+
+trend_model_counter_manila <- lm(manila_waterlevel_counter ~ time_period)
+
+slope_counter_manila <- coef(trend_model_counter_manila)[2]
+intercept_counter_manila <- coef(trend_model_counter_manila)[1]
+
+manila_data_counter <- data.frame(
+  Time = time_period,  
+  WaterLevel = manila_waterlevel_counter
+)
+
+#plot
+
+manila_combined_data <- data.frame(
+  Time = time_period,
+  WaterLevel = c(manila_waterlevel_observed, manila_waterlevel_counter),
+  Dataset = rep(c("Observed", "Counterfactual"), each = length(time_period))
+)
+
+plot_ma <-ggplot(manila_combined_data, aes(x = Time, y = WaterLevel, color = Dataset, linetype = Dataset)) +
+  geom_line(size = 0.5) +
+  scale_color_manual(values = c("Observed" = "blue", "Counterfactual" = "orange")) +
+  scale_linetype_manual(values = c("Observed" = "dashed", "Counterfactual" = "solid")) +
+  geom_abline(slope = coef(trend_model_counter_manila)[2], intercept = coef(trend_model_counter_manila )[1], color = "orange", size = 0.9) + 
+  geom_abline(slope = coef(trend_model_observ_manila)[2], intercept = coef(trend_model_observ_manila)[1], color = "blue", size = 0.9) +  
+  labs(
+    title = "Observed vs Counterfactual Sea Levels in Manila",
+    x = "Time",
+    y = "Relative Sea Level (mm)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10)
+  )
+
+plot(plot_ma)
+
+
+
+```
+
+
+
+## **Combine the plots**
+
+For this I will show and adjust all the previous plots again. This is up to you, in what way you feel most comfortable doing this. Like this everything is together and it gives a better overview (if there are problems with the visualization it helps to export the final plot and look at it as a .png or pdf file):
+
+```{r}
+
+plot_ma <- ggplot(manila_combined_data, aes(x = Time, y = WaterLevel, color = Dataset, linetype = Dataset)) +
+  geom_line(size = 0.5) +
+  scale_color_manual(values = c("Observed" = "blue", "Counterfactual" = "orange")) +
+  scale_linetype_manual(values = c("Observed" = "dashed", "Counterfactual" = "solid")) +
+  geom_abline(slope = coef(trend_model_counter_manila)[2], intercept = coef(trend_model_counter_manila)[1], color = "orange", size = 0.9) + 
+  geom_abline(slope = coef(trend_model_observ_manila)[2], intercept = coef(trend_model_observ_manila)[1], color = "blue", size = 0.9) +  
+  labs(
+    title = "Manila",
+    x = "Time",
+    y = "Relative Sea Level (mm)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "plain", color = "purple"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    legend.position = "none"  
+  )
+
+
+
+
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+world_plot <- ggplot() +
+  geom_sf(data = world, fill = "gray90", color = "white") +
+  geom_point(
+    data = charlottetown_location, 
+    aes(x = lon, y = lat), 
+    color = "red", 
+    size = 2
+  ) +   
+  geom_text(
+    data = charlottetown_location, 
+    aes(x = lon, y = lat, label = name), 
+    hjust = -0.2, vjust = 0, size = 4, color = "red"
+  ) +
+  geom_point(
+    data = stockholm_location, 
+    aes(x = lon, y = lat), 
+    color = "blue", 
+    size = 2
+  ) +
+  geom_text(
+    data = stockholm_location, 
+    aes(x = lon, y = lat, label = name), 
+    hjust = -0.2, vjust = 0, size = 4, color = "blue"
+  ) + 
+  geom_point(
+    data = manila_location, 
+    aes(x = lon, y = lat), 
+    color = "purple", 
+    size = 2
+  ) +
+  geom_text(
+    data = manila_location, 
+    aes(x = lon, y = lat, label = name), 
+    hjust = -0.2, vjust = 0, size = 4, color = "purple"
+  ) +
+  labs(
+    title = "Locations on World Map",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  coord_sf(xlim = c(-180, 180), ylim = c(-90, 90), expand = FALSE) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "plain"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10)
+  )
+
+
+plot_ch <- ggplot(charlottetown_combined_data, aes(x = Time, y = WaterLevel, color = Dataset, linetype = Dataset)) +
+  geom_line(size = 0.5) +
+  scale_color_manual(values = c("Observed" = "blue", "Counterfactual" = "orange")) +
+  scale_linetype_manual(values = c("Observed" = "dashed", "Counterfactual" = "solid")) +
+  geom_abline(slope = coef(trend_model_count_ch)[2], intercept = coef(trend_model_count_ch)[1], color = "orange", size = 0.9) + 
+  geom_abline(slope = coef(trend_model_observ_ch)[2], intercept = coef(trend_model_observ_ch)[1], color = "blue", size = 0.9) +  
+  labs(
+    title = "Charlottetown",
+    x = "Time",
+    y = "Relative Sea Level (mm)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "plain", color = "red"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10)
+  )
+
+
+plot_st <- ggplot(stockholm_combined_data, aes(x = Time, y = WaterLevel, color = Dataset, linetype = Dataset)) +
+  geom_line(size = 0.5) +
+  scale_color_manual(values = c("Observed" = "blue", "Counterfactual" = "orange")) +
+  scale_linetype_manual(values = c("Observed" = "dashed", "Counterfactual" = "solid")) +
+  geom_abline(slope = coef(trend_model_counter_st)[2], intercept = coef(trend_model_counter_st)[1], color = "orange", size = 0.9) + 
+  geom_abline(slope = coef(trend_model_observ_st)[2], intercept = coef(trend_model_observ_st)[1], color = "blue", size = 0.9) +  
+  labs(
+    title = "Stockholm",
+    x = "Time",
+    y = ""
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "plain", color = "blue"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    legend.position = "none"  
+  )
+
+```
+
+```{r, fig.width=10, fig.height=8}
+library(patchwork)
+
+combined_plot <- (
+  (world_plot | plot_ch) /
+    (plot_ma | plot_st) +
+    plot_annotation(
+      title = "Sea Level Trends for different locations",
+      subtitle = "Observed vs Counterfactual Sea Levels for Selected Cities",
+      theme = theme(
+        plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+        plot.subtitle = element_text(size = 14, hjust = 0.5)
+      )
+    )
+)
+
+print(combined_plot)
+
+ggsave("combined_sea_level_plot.png", plot = combined_plot, width = 12, height = 8, dpi = 400)
+```
+
